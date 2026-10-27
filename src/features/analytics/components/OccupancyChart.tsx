@@ -50,6 +50,8 @@ function OccupancyChart({ points, timeZone, axisEnd }: OccupancyChartProps) {
     [timeZone],
   )
 
+  const lastPoint = useMemo(() => points.at(-1), [points])
+
   const summary = useMemo(() => {
     const peak = getPeak(points, (p) => p.value)
     const label = peak
@@ -104,7 +106,7 @@ function OccupancyChart({ points, timeZone, axisEnd }: OccupancyChartProps) {
               />
             }
           />
-          <LiveOccupancyPoint />
+          <LiveOccupancyPoint from={lastPoint} />
           <Area
             dataKey="value"
             type="monotone"
