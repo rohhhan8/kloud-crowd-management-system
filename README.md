@@ -33,7 +33,7 @@ A few requirements are easy to skim past, so I wrote down how I understood them:
 | Styling | Tailwind CSS v4, shadcn/ui on Radix | Radix gives me focus handling, dialogs and selects that already behave correctly with a keyboard and a screen reader. I own the component code, so changing it is cheap. |
 | Routing | React Router 8 | Lazy routes and URL search params, which I use as the source of truth for filters. |
 | Server state | TanStack Query | Caching, de-duplicated requests, retry rules and `keepPreviousData` for pagination. |
-| Auth state | Redux Toolkit, auth only | The session is the one piece of global client state that several unrelated parts read. API data is deliberately kept out of Redux; see the decisions section. |
+| Auth state | Redux Toolkit, auth only | The session is the one piece of global client state that several unrelated parts read. API data is deliberately kept out of Redux, because TanStack Query already owns caching and retries. |
 | HTTP | Axios with interceptors | One place to attach the token and one place to react to a 401. |
 | Live data | socket.io-client | The backend speaks Socket.IO. |
 | Charts | Recharts through the shadcn chart wrapper | Gives me theme tokens and tooltip styling without writing SVG by hand. |
@@ -206,22 +206,6 @@ Shared building blocks that exist and where they are reused:
 
 The rule I followed: presentational components take props and render, containers compose hooks, components never call Axios, logic lives in hooks, and lists such as navigation, date presets and stat cards come from config arrays.
 
-## Key decisions and trade-offs
-
-**Time zone for "today".** Each site has an IANA time zone, and "today", "yesterday" and "last 7 days" are computed as day boundaries in that zone (`startOfSiteDay` in `lib/utils/date.ts`, using `TZDate`), then sent as UTC epoch milliseconds. If I used the browser's zone, a person in one country looking at a site in another would see a day that starts and ends at the wrong hours, and the same link would show different numbers on two machines. The cost is that the date selector shows the site's zone beside it, so the user knows which clock applies.
-
-**Hourly history plus one live marker.** The occupancy chart is hourly REST history. The live value comes from the socket and is shown on the Today view as a dot on the end of the hourly line, with a "Live" tooltip on hover, plus a dotted "LIVE" line at the current time. I did not mix the two sources in one series and I did not poll the REST endpoints to fake a live feed, because those endpoints are slow, can be rate limited and are history by design. The live value is derived on the fly and is never written into the hourly data or the cache.
-
-**Socket instead of polling.** There is one connection, created only inside the protected layout, authenticated through the handshake, and torn down on logout. The server broadcasts every site's events, so the client filters by `siteId`. Live occupancy writes to the cache at most once per second. If the socket is down, REST data is unaffected, the Live Occupancy card falls back to the last hourly value with an "Hourly avg" caption, and the header shows "Reconnecting" or "Offline". When the connection comes back a toast says so.
-
-**Server-driven pagination.** The pager has previous, next, a numbered window with the first and last page, and a jump-to-page box behind the ellipsis. Page and size are in the URL. I prefetch only the next page after the current one has loaded, because entries take several seconds per page and prefetching more would queue requests behind the one the user is waiting for. Row keys combine person, entry time and zone, because the same person appears many times.
-
-**JWT in localStorage.** The API returns the token in the response body, so an httpOnly cookie was not available without a backend change. A token in `localStorage` can be read by any script that runs on the page, which makes XSS the main risk. What I did about it: no `dangerouslySetInnerHTML` in my own code (the shadcn chart wrapper uses it once, to inject colour variables from static config), every response and input validated, the token never logged or put in a URL, a client-side expiry timer, one global logout on a 401, and only an in-app path is accepted as the post-login redirect.
-
-**Comparison queries run after the primary ones.** The "than yesterday" indicators need a second range for footfall and dwell. The backend is slow and seems to process requests one after another, so firing all of them at once makes the cards wait behind the comparison. The comparison queries are enabled only after the current footfall and dwell have settled. A failed comparison removes only the trend line, not the card.
-
-**Redux only for auth.** I did not put API data in Redux because TanStack Query already owns caching, staleness and retries, and copying that into a store means keeping two copies in sync. The session is different: it is not fetched, several unrelated parts read it, and the token has side effects (storage, an expiry timer, the socket). The alerts list is also in Redux because it is live UI state and not something the server can be asked for again.
-
 ## Performance and optimization
 
 **Code splitting.** `LoginPage`, `OverviewPage`, `EntriesPage` and `NotFoundPage` are `React.lazy` in `app/router.tsx`, with a `PageSkeleton` fallback. The app shell (`AppLayout`, with the sidebar, header and socket provider) is a lazy route as well, so the login page does not download it. Recharts is kept out of the initial load: `OccupancyChart`, `DemographicsChart` and `DemographicsDonut` are lazy, and `ChartCard` shows a chart-shaped skeleton while they load. The alerts drawer is lazy and is fetched the first time the bell is used. In the initial bundle on purpose: React, the router, TanStack Query, Radix (the login page uses it), Axios and zod, and Redux Toolkit.
@@ -263,23 +247,6 @@ I removed `memo` from small components such as the severity badge and avatar onc
 
 **Network behaviour.** The Overview load makes one request for sites and six for data: four analytics calls (footfall, dwell, occupancy, demographics) and two comparison calls (footfall and dwell for the previous range). The Entries page makes one entries request and then prefetches the next page. From what I observed, one analytics call takes about 1.5 to 3.5 seconds and one entries page about 3.5 to 4.8 seconds. The six Overview calls fired together finish in roughly 15 seconds, which is why those calls use the longer timeout.
 
-## UX and accessibility
-
-These exist in the code:
-
-- A skip link to the main content, and focus moves to the page heading when the route changes.
-- Visible focus rings, and a drawer that traps focus, closes on Escape and returns focus to the bell.
-- Keyboard shortcuts (`g o`, `g e`, `b`, `?`) that are ignored while typing in a field.
-- `aria-current` on the active nav item and the current page, and `aria-disabled` on pagination buttons so focus is not lost at the first and last page.
-- Charts are exposed as images with a text summary, plus a screen-reader-only data table. The live value is an extra row in that table.
-- Data tables have captions, and the stat labels use `dl`.
-- Polite live regions: the connection status, a pagination page announcement, and a summary of new alerts that is limited to once every five seconds.
-- Severity and trends always carry a text label, so colour is never the only signal.
-- `prefers-reduced-motion` is respected in CSS and in chart animation.
-- Every widget has a loading state, an empty state and an error state with Retry, and an offline banner appears when the browser reports it is offline.
-
-The layout is built for desktop first. I checked widths from 390 to 1920 pixels for horizontal overflow, and the page itself does not scroll sideways at any of them. On narrow screens the navigation moves into a sheet and the Zone column is hidden.
-
 ## Error handling
 
 | Condition | What the user sees |
@@ -308,18 +275,6 @@ A server-provided `message` or `errorMessage` is used when present. Each widget 
 ## Deployment
 
 The app is a static build, meant for Vercel. Set `VITE_API_BASE_URL` (and `VITE_SOCKET_URL` if the socket lives somewhere else) in the project settings. `vercel.json` rewrites every path to `index.html`, and `public/_redirects` does the same for Netlify, so opening or refreshing `/entries` directly does not return a 404.
-
-## Known limitations and what I would do next
-
-- No automated tests were written, since they were outside the assignment's scope. I checked behaviour by hand and with throwaway browser scripts. Coverage for the zod schemas, the date range helpers and the alerts reducer is what I would add first.
-- The token is in `localStorage`. With a backend that can set an httpOnly cookie I would move to that.
-- I have no Lighthouse scores. Running it against the preview build did not work in my environment, so I make no performance score claims.
-- I never ran the React profiler, so the render isolation is by design and not measured. Profiling a socket event and a page change is the next check.
-- The initial load is about 224 kB gzipped, and Radix is part of it because the login page uses it. Trimming it needs the login page to avoid those primitives.
-- The Vite `advancedChunks` option is deprecated and should move to `codeSplitting`.
-- The design has a language chip and user photos in the header that I did not build, and I kept a Zone column in the entries table that the design omits.
-- Dark mode is not built, because a number of components use fixed colours.
-- On mobile, the navigation sheet can reopen after the window is resized across the breakpoint.
 
 ## What is in `docs/`
 
