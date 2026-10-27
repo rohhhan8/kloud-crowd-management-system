@@ -210,7 +210,7 @@ The rule I followed: presentational components take props and render, containers
 
 **Time zone for "today".** Each site has an IANA time zone, and "today", "yesterday" and "last 7 days" are computed as day boundaries in that zone (`startOfSiteDay` in `lib/utils/date.ts`, using `TZDate`), then sent as UTC epoch milliseconds. If I used the browser's zone, a person in one country looking at a site in another would see a day that starts and ends at the wrong hours, and the same link would show different numbers on two machines. The cost is that the date selector shows the site's zone beside it, so the user knows which clock applies.
 
-**Hourly history plus one live marker.** The occupancy chart is hourly REST history. The live value comes from the socket and is drawn as a single "now" marker on the Today view, with a short connector from the last hourly point so the line does not stop short. I did not mix the two sources in one series and I did not poll the REST endpoints to fake a live feed, because those endpoints are slow, can be rate limited and are history by design. The live point is derived on the fly and is never written into the hourly data or the cache.
+**Hourly history plus one live marker.** The occupancy chart is hourly REST history. The live value comes from the socket and is shown on the Today view as a dot on the end of the hourly line, with a "Live" tooltip on hover, plus a dotted "LIVE" line at the current time. I did not mix the two sources in one series and I did not poll the REST endpoints to fake a live feed, because those endpoints are slow, can be rate limited and are history by design. The live value is derived on the fly and is never written into the hourly data or the cache.
 
 **Socket instead of polling.** There is one connection, created only inside the protected layout, authenticated through the handshake, and torn down on logout. The server broadcasts every site's events, so the client filters by `siteId`. Live occupancy writes to the cache at most once per second. If the socket is down, REST data is unaffected, the Live Occupancy card falls back to the last hourly value with an "Hourly avg" caption, and the header shows "Reconnecting" or "Offline". When the connection comes back a toast says so.
 
@@ -319,7 +319,6 @@ The app is a static build, meant for Vercel. Set `VITE_API_BASE_URL` (and `VITE_
 - The Vite `advancedChunks` option is deprecated and should move to `codeSplitting`.
 - The design has a language chip and user photos in the header that I did not build, and I kept a Zone column in the entries table that the design omits.
 - Dark mode is not built, because a number of components use fixed colours.
-- If the live value is higher than every hourly value, the connector on the occupancy chart can be clipped at the top of the chart.
 - On mobile, the navigation sheet can reopen after the window is resized across the breakpoint.
 
 ## What is in `docs/`

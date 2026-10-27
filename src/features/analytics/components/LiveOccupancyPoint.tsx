@@ -1,4 +1,5 @@
-import { ReferenceLine, useXAxisScale, useYAxisScale } from 'recharts'
+import { useState } from 'react'
+import { ReferenceDot, ReferenceLine } from 'recharts'
 import { useLiveChartPoint } from '../hooks/useLiveChartPoint'
 
 const COLOR = '#b91c1c'
@@ -8,15 +9,13 @@ const TAG_HEIGHT = 18
 interface LiveTagProps {
   x: number
   y: number
-  value: number
 }
 
 /** Red "LIVE" pill with a small pointer, sitting on top of the dotted line. */
-function LiveTag({ x, y, value }: LiveTagProps) {
+function LiveTag({ x, y }: LiveTagProps) {
   const top = y - TAG_HEIGHT - 6
   return (
     <g>
-      <title>{`Live ${value}`}</title>
       <rect
         x={x - TAG_WIDTH / 2}
         y={top}
@@ -44,44 +43,73 @@ function LiveTag({ x, y, value }: LiveTagProps) {
   )
 }
 
-const LINE_COLOR = '#5fb0ab'
+const TIP_WIDTH = 74
+const TIP_HEIGHT = 24
+
+interface DotShapeProps {
+  cx?: number
+  cy?: number
+}
+
+/** Dot on the last hourly point; hovering it shows a "Live <count>" tooltip. */
+function LiveDot({ cx = 0, cy = 0, value }: DotShapeProps & { value: number }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <g
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ cursor: 'default' }}
+    >
+      <circle cx={cx} cy={cy} r={10} fill="transparent" />
+      <circle cx={cx} cy={cy} r={9} fill={COLOR} fillOpacity={0.2} />
+      <circle cx={cx} cy={cy} r={5} fill={COLOR} stroke="#fff" strokeWidth={2} />
+      {hovered && (
+        <g pointerEvents="none">
+          <rect
+            x={cx - TIP_WIDTH / 2}
+            y={cy - TIP_HEIGHT - 12}
+            width={TIP_WIDTH}
+            height={TIP_HEIGHT}
+            rx={6}
+            fill="#fff"
+            stroke="#e5e7eb"
+          />
+          <text
+            x={cx}
+            y={cy - TIP_HEIGHT / 2 - 12}
+            fontSize={12}
+            fontWeight={600}
+            fill="#111827"
+            textAnchor="middle"
+            dominantBaseline="central"
+          >
+            {`Live ${value}`}
+          </text>
+        </g>
+      )}
+    </g>
+  )
+}
 
 interface LiveOccupancyPointProps {
-  
+  /** Last hourly point: the live dot sits on the end of the line. */
   from?: { time: number; value: number }
 }
 
 /** In-chart live layer; the only part of the chart that re-renders on socket updates. */
 export function LiveOccupancyPoint({ from }: LiveOccupancyPointProps) {
   const point = useLiveChartPoint()
-  const xScale = useXAxisScale()
-  const yScale = useYAxisScale()
   if (!point) return null
-
-  const x1 = from && xScale?.(from.time)
-  const y1 = from && yScale?.(from.value)
-  const x2 = xScale?.(point.at)
-  const y2 = yScale?.(point.value)
-  const base = yScale?.(0)
-  const connect =
-    typeof x1 === 'number' &&
-    typeof y1 === 'number' &&
-    typeof x2 === 'number' &&
-    typeof y2 === 'number' &&
-    typeof base === 'number' &&
-    x2 > x1
 
   return (
     <>
-      {connect && (
-        <g aria-hidden="true">
-          <path
-            d={`M${x1} ${y1} L${x2} ${y2} L${x2} ${base} L${x1} ${base}Z`}
-            fill={LINE_COLOR}
-            fillOpacity={0.12}
-          />
-          <path d={`M${x1} ${y1} L${x2} ${y2}`} stroke={LINE_COLOR} strokeWidth={1.5} fill="none" />
-        </g>
+      {from && (
+        <ReferenceDot
+          x={from.time}
+          y={from.value}
+          ifOverflow="extendDomain"
+          shape={(props: DotShapeProps) => <LiveDot {...props} value={point.value} />}
+        />
       )}
       <ReferenceLine
         x={point.at}
@@ -89,7 +117,7 @@ export function LiveOccupancyPoint({ from }: LiveOccupancyPointProps) {
         strokeWidth={2}
         strokeDasharray="2 3"
         label={({ viewBox }: { viewBox?: { x?: number; y?: number } }) => (
-          <LiveTag x={viewBox?.x ?? 0} y={viewBox?.y ?? 0} value={point.value} />
+          <LiveTag x={viewBox?.x ?? 0} y={viewBox?.y ?? 0} />
         )}
       />
     </>
